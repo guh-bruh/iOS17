@@ -1,0 +1,81 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # compileSdk used by the project (see buildSrc Versions)
+          packages: "platforms;android-32 build-tools;32.0.0"
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build release APK (apiS variant)
+        run: ./gradlew :app:assembleApiSRelease --no-daemon --stacktrace
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlissLauncher-release-apiS
+          path: app/build/outputs/apk/apiS/release/*.apk
+          if-no-files-found: error
+
+      - name: Build debug APK (apiS variant)
+        run: ./gradlew :app:assembleApiSDebug --no-daemon
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlissLauncher-debug-apiS
+          path: app/build/outputs/apk/apiS/debug/*.apk
+          if-no-files-found: warn
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: BlissLauncher-*
+          path: apks
+
+      - name: Flatten APKs
+        run: |
+          mkdir -p final
+          find apks -name "*.apk" -exec cp {} final/ \;
+          ls -la final
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: final/*.apk
+          generate_release_notes: true
